@@ -1,6 +1,5 @@
-// netlify/functions/notion.js
+// netlify/functions/proxy-notion.js
 // Proxies all Notion API requests to bypass CORS
-// Environment variable required: NOTION_TOKEN
 
 export const handler = async (event) => {
   const NOTION_TOKEN = process.env.NOTION_TOKEN;
@@ -9,10 +8,34 @@ export const handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: "NOTION_TOKEN not set" }) };
   }
 
-  // Extract the Notion API path from the request
-  // e.g. /api/notion/databases/xxx -> /v1/databases/xxx
-  const path = event.path.replace("/.netlify/functions/notion", "").replace("/api/notion", "") || "/";
-  const notionUrl = `https://api.notion.com/v1${path}${event.rawQuery ? "?" + event.rawQuery : ""}`;
+  // Handle CORS preflight
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS"
+      },
+      body: ""
+    };
+  }
+
+  // Strip all known prefixes to get just the Notion API path
+  // event.path could be:
+  //   /.netlify/functions/proxy-notion/databases/xxx
+  //   /api/proxy-notion/databases/xxx
+  let apiPath = event.path
+    .replace(/^\/.netlify\/functions\/proxy-notion/, "")
+    .replace(/^\/api\/proxy-notion/, "");
+
+  // Ensure it starts with /
+  if (!apiPath.startsWith("/")) apiPath = "/" + apiPath;
+  if (apiPath === "") apiPath = "/";
+
+  const notionUrl = `https://api.notion.com/v1${apiPath}${event.rawQuery ? "?" + event.rawQuery : ""}`;
+
+  console.log("Proxying to:", notionUrl);
 
   const headers = {
     "Authorization": `Bearer ${NOTION_TOKEN}`,
