@@ -3,6 +3,8 @@ import {
   fetchTasks, createTask, updateTask, deleteTask,
   fetchKb, createKbEntry, deleteKbEntry
 } from "./notion.js";
+import * as XLSX from "xlsx";
+import mammoth from "mammoth";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -68,7 +70,6 @@ function parseMsgAB(ab) {
 
 async function parseExcel(file) {
   try {
-    const XLSX = await import("xlsx");
     const ab = await toAB(file);
     const wb = XLSX.read(ab, { type:"array" });
     const parts = [];
@@ -82,8 +83,6 @@ async function parseExcel(file) {
 
 async function parseWord(file) {
   try {
-    const m = await import("mammoth");
-    const mammoth = m.default||m;
     const result = await mammoth.extractRawText({ arrayBuffer: await toAB(file) });
     return result.value?.slice(0,5000) || "(no text)";
   } catch(e) { return `(Word parse failed: ${e.message})`; }
