@@ -28,7 +28,7 @@ export async function fetchTasks() {
 export async function createTask(task) {
   const page = await notionFetch("/pages", {
     method: "POST",
-    body: JSON.stringify(taskToPage(task))
+    body: JSON.stringify(await taskToPage(task))
   });
   return pageToTask(page);
 }
@@ -105,10 +105,16 @@ function pageToTask(page) {
   };
 }
 
-function taskToPage(task) {
+async function getTasksTitleKey() {
+  const db = await notionFetch(`/databases/${TASKS_DB}`);
+  return Object.entries(db.properties).find(([k,v]) => v.type === "title")?.[0] || "Task name";
+}
+
+async function taskToPage(task) {
+  const titleKey = await getTasksTitleKey();
   const subtaskText = (task.subtasks || []).map(s => `${s.done ? "✅" : "⬜"} ${s.text}`).join("\n");
   const props = {
-    "Task name": { title: [{ text: { content: task.title } }] },
+    [titleKey]: { title: [{ text: { content: task.title } }] },
     "Status": { select: { name: task.status || "Not Started" } },
     "Priority": { select: { name: task.priority || "Medium" } },
     "Description": { rich_text: [{ text: { content: (task.description || "").slice(0, 2000) } }] },
@@ -118,7 +124,7 @@ function taskToPage(task) {
   return { parent: { database_id: TASKS_DB }, properties: props };
 }
 
-function patchToProperties(patch) {
+async function patchToProperties(patch) {
   const props = {};
   if (patch.status) props["Status"] = { select: { name: patch.status } };
   if (patch.priority) props["Priority"] = { select: { name: patch.priority } };
@@ -128,7 +134,8 @@ function patchToProperties(patch) {
     props["Subtasks"] = { rich_text: [{ text: { content: text } }] };
   }
   if (patch.title) {
-    props["Task name"] = { title: [{ text: { content: patch.title } }] };
+    const titleKey = await getTasksTitleKey();
+    props[titleKey] = { title: [{ text: { content: patch.title } }] };
   }
   return props;
 }
