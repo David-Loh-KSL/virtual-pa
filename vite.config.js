@@ -7,16 +7,17 @@ export default defineConfig({
     include: ['xlsx', 'mammoth']
   },
   build: {
-    rollupOptions: {
-      external: [],
-    },
     commonjsOptions: {
       include: [/xlsx/, /mammoth/, /node_modules/]
     }
   },
   server: {
     proxy: {
-      '/api': {
+      '/api/notion': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
+      },
+      '/api/claude': {
         target: 'http://localhost:3001',
         changeOrigin: true
       }
