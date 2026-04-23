@@ -270,7 +270,7 @@ ${ks}
         return { role: m.role, content: typeof m.content === "string" ? m.content : m.content };
       });
 
-      const resp = await fetch("/api/claude", {
+      const resp = await fetch("/api/proxy-claude", {
         method: "POST",
         headers: { "Content-Type":"application/json" },
         body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:2000, system: buildSystem(), messages: history })

@@ -1,7 +1,7 @@
 // src/notion.js
 // All Notion API calls go through /api/notion (proxied to avoid CORS)
 
-const API = import.meta.env.VITE_API_BASE || "/api/notion";
+const API = "/api/proxy-notion";
 const TASKS_DB = import.meta.env.VITE_TASKS_DB_ID;
 const KB_DB = import.meta.env.VITE_KB_DB_ID;
 
@@ -16,6 +16,11 @@ async function notionFetch(path, options = {}) {
 }
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
+
+export async function debugTasksDB() {
+  const db = await notionFetch(`/databases/${TASKS_DB}`);
+  return Object.entries(db.properties).map(([k,v]) => `${k}: ${v.type}`);
+}
 
 export async function fetchTasks() {
   const data = await notionFetch(`/databases/${TASKS_DB}/query`, {
@@ -36,7 +41,7 @@ export async function createTask(task) {
 export async function updateTask(notionId, patch) {
   const page = await notionFetch(`/pages/${notionId}`, {
     method: "PATCH",
-    body: JSON.stringify({ properties: patchToProperties(patch) })
+    body: JSON.stringify({ properties: await patchToProperties(patch) })
   });
   return pageToTask(page);
 }
