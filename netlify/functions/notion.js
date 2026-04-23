@@ -1,48 +1,170 @@
-// netlify/functions/notion.js
-// Proxies all Notion API requests to bypass CORS
-// Environment variable required: NOTION_TOKEN
+// src/notion.js
+// All Notion API calls go through /api/notion (proxied to avoid CORS)
 
-export const handler = async (event) => {
-  const NOTION_TOKEN = process.env.NOTION_TOKEN;
+const API = import.meta.env.VITE_API_BASE || "/api/notion";
+const TASKS_DB = import.meta.env.VITE_TASKS_DB_ID;
+const KB_DB = import.meta.env.VITE_KB_DB_ID;
 
-  if (!NOTION_TOKEN) {
-    return { statusCode: 500, body: JSON.stringify({ error: "NOTION_TOKEN not set" }) };
-  }
+async function notionFetch(path, options = {}) {
+  const res = await fetch(`${API}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...options.headers }
+  });
+  const data = await res.json();
+  if (data.object === "error") throw new Error(data.message);
+  return data;
+}
 
-  // Extract the Notion API path from the request
-  // e.g. /api/notion/databases/xxx -> /v1/databases/xxx
-  const path = event.path.replace("/.netlify/functions/notion", "").replace("/api/notion", "") || "/";
-  const notionUrl = `https://api.notion.com/v1${path}${event.rawQuery ? "?" + event.rawQuery : ""}`;
+// ── Tasks ─────────────────────────────────────────────────────────────────────
 
-  const headers = {
-    "Authorization": `Bearer ${NOTION_TOKEN}`,
-    "Content-Type": "application/json",
-    "Notion-Version": "2022-06-28"
+export async function debugTasksDB() {
+  const db = await notionFetch(`/databases/${TASKS_DB}`);
+  return Object.entries(db.properties).map(([k,v]) => `${k}: ${v.type}`);
+}
+
+export async function fetchTasks() {
+  const data = await notionFetch(`/databases/${TASKS_DB}/query`, {
+    method: "POST",
+    body: JSON.stringify({ sorts: [{ property: "Due Date", direction: "ascending" }] })
+  });
+  return data.results.map(pageToTask);
+}
+
+export async function createTask(task) {
+  const page = await notionFetch("/pages", {
+    method: "POST",
+    body: JSON.stringify(await taskToPage(task))
+  });
+  return pageToTask(page);
+}
+
+export async function updateTask(notionId, patch) {
+  const page = await notionFetch(`/pages/${notionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties: await patchToProperties(patch) })
+  });
+  return pageToTask(page);
+}
+
+// ── Knowledge Base ────────────────────────────────────────────────────────────
+
+export async function fetchKb() {
+  const data = await notionFetch(`/databases/${KB_DB}/query`, {
+    method: "POST",
+    body: JSON.stringify({ sorts: [{ property: "Category", direction: "ascending" }] })
+  });
+  return data.results.map(pageToKb);
+}
+
+export async function createKbEntry(entry) {
+  const page = await notionFetch("/pages", {
+    method: "POST",
+    body: JSON.stringify(kbToPage(entry))
+  });
+  return pageToKb(page);
+}
+
+export async function deleteKbEntry(notionId) {
+  await notionFetch(`/pages/${notionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ archived: true })
+  });
+}
+
+export async function deleteTask(notionId) {
+  await notionFetch(`/pages/${notionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ archived: true })
+  });
+}
+
+// ── Converters ────────────────────────────────────────────────────────────────
+
+function getRichText(prop) {
+  return prop?.rich_text?.map(t => t.plain_text).join("") || "";
+}
+function getTitle(prop) {
+  return prop?.title?.map(t => t.plain_text).join("") || "";
+}
+
+function pageToTask(page) {
+  const p = page.properties;
+  const titleKey = Object.keys(p).find(k => p[k].type === "title") || "Name";
+  const subtaskRaw = getRichText(p["Subtasks"]);
+  const subtasks = subtaskRaw ? subtaskRaw.split("\n").filter(Boolean).map((line, i) => ({
+    id: `st_${i}`,
+    text: line.replace(/^[✅⬜]\s*/, ""),
+    done: line.startsWith("✅")
+  })) : [];
+
+  return {
+    id: page.id.replace(/-/g, "").slice(0, 8),
+    notionId: page.id,
+    title: getTitle(p[titleKey]),
+    status: p["Status"]?.select?.name || "Not Started",
+    priority: p["Priority"]?.select?.name || "Medium",
+    dueDate: p["Due Date"]?.date?.start || null,
+    description: getRichText(p["Description"]),
+    subtasks,
+    createdAt: page.created_time?.slice(0, 10) || new Date().toISOString().slice(0, 10)
   };
+}
 
-  try {
-    const response = await fetch(notionUrl, {
-      method: event.httpMethod,
-      headers,
-      body: event.body && event.httpMethod !== "GET" ? event.body : undefined
-    });
+async function getTasksTitleKey() {
+  const db = await notionFetch(`/databases/${TASKS_DB}`);
+  return Object.entries(db.properties).find(([k,v]) => v.type === "title")?.[0] || "Task name";
+}
 
-    const data = await response.json();
+async function taskToPage(task) {
+  const titleKey = await getTasksTitleKey();
+  const subtaskText = (task.subtasks || []).map(s => `${s.done ? "✅" : "⬜"} ${s.text}`).join("\n");
+  const props = {
+    [titleKey]: { title: [{ text: { content: task.title } }] },
+    "Status": { select: { name: task.status || "Not Started" } },
+    "Priority": { select: { name: task.priority || "Medium" } },
+    "Description": { rich_text: [{ text: { content: (task.description || "").slice(0, 2000) } }] },
+    "Subtasks": { rich_text: [{ text: { content: subtaskText } }] }
+  };
+  if (task.dueDate) props["Due Date"] = { date: { start: task.dueDate } };
+  return { parent: { database_id: TASKS_DB }, properties: props };
+}
 
-    return {
-      statusCode: response.status,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS"
-      },
-      body: JSON.stringify(data)
-    };
-  } catch (err) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: err.message })
-    };
+async function patchToProperties(patch) {
+  const props = {};
+  if (patch.status) props["Status"] = { select: { name: patch.status } };
+  if (patch.priority) props["Priority"] = { select: { name: patch.priority } };
+  if ("dueDate" in patch) props["Due Date"] = patch.dueDate ? { date: { start: patch.dueDate } } : { date: null };
+  if (patch.subtasks !== undefined) {
+    const text = patch.subtasks.map(s => `${s.done ? "✅" : "⬜"} ${s.text}`).join("\n");
+    props["Subtasks"] = { rich_text: [{ text: { content: text } }] };
   }
-};
+  if (patch.title) {
+    const titleKey = await getTasksTitleKey();
+    props[titleKey] = { title: [{ text: { content: patch.title } }] };
+  }
+  return props;
+}
+
+function pageToKb(page) {
+  const p = page.properties;
+  const titleKey = Object.keys(p).find(k => p[k].type === "title") || "Name";
+  return {
+    id: page.id.replace(/-/g, "").slice(0, 8),
+    notionId: page.id,
+    title: getTitle(p[titleKey]),
+    category: p["Category"]?.select?.name || "Other",
+    content: getRichText(p["Content"]),
+    createdAt: page.created_time?.slice(0, 10) || new Date().toISOString().slice(0, 10)
+  };
+}
+
+function kbToPage(entry) {
+  return {
+    parent: { database_id: KB_DB },
+    properties: {
+      "Name": { title: [{ text: { content: entry.title } }] },
+      "Category": { select: { name: entry.category || "Other" } },
+      "Content": { rich_text: [{ text: { content: (entry.content || "").slice(0, 2000) } }] }
+    }
+  };
+}

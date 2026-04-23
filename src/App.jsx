@@ -171,6 +171,9 @@ export default function App() {
       const saved = await createTask(newTask);
       setTasks(prev => [...prev, saved]);
       return saved;
+    } catch(e) {
+      console.error("addTask failed:", e);
+      throw e;
     } finally { setSyncing(false); }
   }, []);
 
@@ -311,7 +314,7 @@ ${ks}
               }
             }
           }
-        } catch(e) { console.warn("Action parse error:", e); }
+        } catch(e) { console.error("Action parse error:", e); done.push(`⚠️ Action failed: ${e.message}`); }
       }
 
       const clean = raw.replace(/```(?:actions|json)?[\s\S]*?```/g, "").trim();
@@ -370,6 +373,16 @@ ${ks}
   };
 
   const APP_PIN = import.meta.env.VITE_APP_PIN || "pa2026";
+
+  const handleDebug = async () => {
+    try {
+      const { debugTasksDB } = await import("./notion.js");
+      const props = await debugTasksDB();
+      alert("Tasks DB properties:\n" + props.join("\n"));
+    } catch(e) {
+      alert("Debug error: " + e.message);
+    }
+  };
 
   const handleLogin = () => {
     if(pinInput === APP_PIN) {
@@ -465,6 +478,7 @@ ${ks}
             <label style={{fontSize:12, color:"var(--text-muted)", whiteSpace:"nowrap"}}>Your email:</label>
             <input value={userEmail} onChange={e => setUserEmail(e.target.value)} style={s.settingsInput} placeholder="your@email.com"/>
             <button style={s.btn} onClick={() => setShowSettings(false)}>Close</button>
+            <button style={s.btn} onClick={handleDebug}>🔍 Debug DB</button>
           </div>
         )}
 
