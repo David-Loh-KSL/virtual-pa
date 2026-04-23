@@ -278,13 +278,9 @@ ${ks}
       const data = await resp.json();
       const raw = data.content?.find(b => b.type === "text")?.text || "Sorry, I couldn't process that.";
 
-      // DEBUG: show raw response temporarily
-      console.log("RAW AI RESPONSE:", raw);
-
       // Execute actions
       // Try to find actions block - AI sometimes outputs ```actions, ```json, or plain ```
       const actMatch = raw.match(/```(?:actions|json)?\s*([\s\S]*?)```/);
-      console.log("ACT MATCH:", actMatch ? actMatch[1].slice(0,200) : "NO MATCH");
       const done = [];
       // Only treat as actions if it looks like a JSON array with action objects
       let parsedActions = null;
@@ -299,9 +295,7 @@ ${ks}
           const actions = parsedActions;
           for(const act of actions) {
             if(act.action === "create_task") {
-              console.log("SUBTASKS RAW:", JSON.stringify(act.subtasks));
               const sub = (act.subtasks||[]).map(s => ({ id:uid(), text: typeof s === "string" ? s : (s?.text || s?.name || JSON.stringify(s)), done: s?.done || false })).filter(s => s.text);
-              console.log("SUBTASKS PROCESSED:", JSON.stringify(sub));
               const t = await addTask({ title:act.title, description:act.description||"", dueDate:act.dueDate||null, priority:act.priority||"Medium", subtasks:sub });
               done.push(`✅ Task created in Notion: "${t.title}"`);
             } else if(act.action === "update_task") {
