@@ -124,6 +124,9 @@ export default function App() {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dataLoading, setDataLoading] = useState(true);
+  const [authed, setAuthed] = useState(() => sessionStorage.getItem("vpa_auth") === "true");
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState(false);
   const [taskFilter, setTaskFilter] = useState("All");
   const [editTask, setEditTask] = useState(null);
   const [kbSearch, setKbSearch] = useState("");
@@ -219,7 +222,7 @@ ${ts}
 ## KNOWLEDGE BASE (live from Notion)
 ${ks}
 
-## ACTIONS — CRITICAL: output ONLY a ```actions block (never ```json) at the END of your message. This is parsed programmatically — wrong block type means actions are IGNORED and shown raw to user:
+## ACTIONS — CRITICAL: output ONLY an 'actions' code block at the END of your message (not 'json'). This is parsed programmatically — wrong block type means actions are IGNORED and shown raw to user:
 \`\`\`actions
 [
   { "action": "create_task", "title": "...", "description": "...", "dueDate": "YYYY-MM-DD or null", "priority": "Low|Medium|High|Urgent", "subtasks": ["step 1","step 2"] },
@@ -365,6 +368,45 @@ ${ks}
     settingsBar: { padding:"10px 20px", borderBottom:"1px solid var(--border-subtle)", background:"rgba(24,24,27,.8)", display:"flex", alignItems:"center", gap:12 },
     settingsInput: { flex:1, background:"var(--bg-elevated)", color:"var(--text-primary)", border:"1px solid var(--border)", borderRadius:8, padding:"6px 12px", fontSize:13, outline:"none" },
   };
+
+  const APP_PIN = import.meta.env.VITE_APP_PIN || "pa2026";
+
+  const handleLogin = () => {
+    if(pinInput === APP_PIN) {
+      sessionStorage.setItem("vpa_auth","true");
+      setAuthed(true);
+      setPinError(false);
+    } else {
+      setPinError(true);
+      setPinInput("");
+    }
+  };
+
+  if(!authed) return (
+    <div style={{display:"flex",height:"100vh",alignItems:"center",justifyContent:"center",background:"var(--bg-base)"}}>
+      <div style={{background:"var(--bg-surface)",border:"1px solid var(--border)",borderRadius:20,padding:40,width:340,display:"flex",flexDirection:"column",alignItems:"center",gap:20}}>
+        <div style={{width:56,height:56,borderRadius:16,background:"linear-gradient(135deg,#7c3aed,#4f46e5)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>🤖</div>
+        <div style={{textAlign:"center"}}>
+          <h2 style={{fontSize:20,fontWeight:600,marginBottom:4}}>Virtual PA</h2>
+          <p style={{fontSize:13,color:"var(--text-muted)"}}>Enter your access PIN to continue</p>
+        </div>
+        <input
+          type="password"
+          value={pinInput}
+          onChange={e=>{setPinInput(e.target.value);setPinError(false);}}
+          onKeyDown={e=>{if(e.key==="Enter")handleLogin();}}
+          placeholder="Enter PIN"
+          autoFocus
+          style={{width:"100%",background:"var(--bg-elevated)",color:"var(--text-primary)",border:`1px solid ${pinError?"var(--danger)":"var(--border)"}`,borderRadius:12,padding:"12px 16px",fontSize:15,outline:"none",textAlign:"center",letterSpacing:4}}
+        />
+        {pinError && <p style={{fontSize:12,color:"var(--danger)",marginTop:-12}}>Incorrect PIN. Try again.</p>}
+        <button onClick={handleLogin}
+          style={{width:"100%",background:"var(--accent)",color:"#fff",border:"none",borderRadius:12,padding:"12px 16px",fontSize:14,fontWeight:500,cursor:"pointer"}}>
+          Unlock
+        </button>
+      </div>
+    </div>
+  );
 
   if(dataLoading) return (
     <div style={{...s.app, alignItems:"center", justifyContent:"center", flexDirection:"column", gap:12}}>
