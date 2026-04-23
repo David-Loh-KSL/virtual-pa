@@ -295,7 +295,7 @@ ${ks}
           const actions = parsedActions;
           for(const act of actions) {
             if(act.action === "create_task") {
-              const sub = (act.subtasks||[]).map(s => ({ id:uid(), text:s, done:false }));
+              const sub = (act.subtasks||[]).map(s => ({ id:uid(), text: typeof s === "string" ? s : (s?.text || s?.name || JSON.stringify(s)), done: s?.done || false })).filter(s => s.text);
               const t = await addTask({ title:act.title, description:act.description||"", dueDate:act.dueDate||null, priority:act.priority||"Medium", subtasks:sub });
               done.push(`✅ Task created in Notion: "${t.title}"`);
             } else if(act.action === "update_task") {
