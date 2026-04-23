@@ -91,11 +91,14 @@ function pageToTask(page) {
   const p = page.properties;
   const titleKey = Object.keys(p).find(k => p[k].type === "title") || "Name";
   const subtaskRaw = getRichText(p["Subtasks"]);
-  const subtasks = subtaskRaw ? subtaskRaw.split("\n").filter(Boolean).map((line, i) => ({
-    id: `st_${i}`,
-    text: line.replace(/^[✅⬜]\s*/, ""),
-    done: line.startsWith("✅")
-  })) : [];
+  const subtasks = subtaskRaw ? subtaskRaw.split("\n").filter(Boolean).map((line, i) => {
+    const text = (line.replace(/^[✅⬜]\s*/, "") || "").trim();
+    return {
+      id: `st_${i}`,
+      text: text || "(no text)",
+      done: line.startsWith("✅")
+    };
+  }).filter(s => s.text && s.text !== "(no text)") : [];
 
   return {
     id: page.id.replace(/-/g, "").slice(0, 8),
@@ -117,7 +120,7 @@ async function getTasksTitleKey() {
 
 async function taskToPage(task) {
   const titleKey = await getTasksTitleKey();
-  const subtaskText = (task.subtasks || []).map(s => `${s.done ? "✅" : "⬜"} ${s.text}`).join("\n");
+  const subtaskText = (task.subtasks || []).filter(s => s && s.text).map(s => `${s.done ? "✅" : "⬜"} ${s.text}`).join("\n");
   const props = {
     [titleKey]: { title: [{ text: { content: task.title } }] },
     "Status": { select: { name: task.status || "Not Started" } },
@@ -135,7 +138,7 @@ async function patchToProperties(patch) {
   if (patch.priority) props["Priority"] = { select: { name: patch.priority } };
   if ("dueDate" in patch) props["Due Date"] = patch.dueDate ? { date: { start: patch.dueDate } } : { date: null };
   if (patch.subtasks !== undefined) {
-    const text = patch.subtasks.map(s => `${s.done ? "✅" : "⬜"} ${s.text}`).join("\n");
+    const text = patch.subtasks.filter(s => s && s.text).map(s => `${s.done ? "✅" : "⬜"} ${s.text}`).join("\n");
     props["Subtasks"] = { rich_text: [{ text: { content: text } }] };
   }
   if (patch.title) {
