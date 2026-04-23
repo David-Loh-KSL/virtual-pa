@@ -219,7 +219,7 @@ ${ts}
 ## KNOWLEDGE BASE (live from Notion)
 ${ks}
 
-## ACTIONS — output JSON block at END of message:
+## ACTIONS — CRITICAL: output ONLY a ```actions block (never ```json) at the END of your message. This is parsed programmatically — wrong block type means actions are IGNORED and shown raw to user:
 \`\`\`actions
 [
   { "action": "create_task", "title": "...", "description": "...", "dueDate": "YYYY-MM-DD or null", "priority": "Low|Medium|High|Urgent", "subtasks": ["step 1","step 2"] },
@@ -273,11 +273,20 @@ ${ks}
       const raw = data.content?.find(b => b.type === "text")?.text || "Sorry, I couldn't process that.";
 
       // Execute actions
-      const actMatch = raw.match(/```actions\s*([\s\S]*?)```/);
+      // Try to find actions block - AI sometimes outputs ```actions, ```json, or plain ```
+      const actMatch = raw.match(/```(?:actions|json)?\s*([\s\S]*?)```/);
       const done = [];
+      // Only treat as actions if it looks like a JSON array with action objects
+      let parsedActions = null;
       if(actMatch) {
         try {
-          const actions = JSON.parse(actMatch[1].trim());
+          const parsed = JSON.parse(actMatch[1].trim());
+          if(Array.isArray(parsed) && parsed[0]?.action) parsedActions = parsed;
+        } catch(e) {}
+      }
+      if(parsedActions) {
+        try {
+          const actions = parsedActions;
           for(const act of actions) {
             if(act.action === "create_task") {
               const sub = (act.subtasks||[]).map(s => ({ id:uid(), text:s, done:false }));
@@ -302,7 +311,7 @@ ${ks}
         } catch(e) { console.warn("Action parse error:", e); }
       }
 
-      const clean = raw.replace(/```actions[\s\S]*?```/g, "").trim();
+      const clean = raw.replace(/```(?:actions|json)?[\s\S]*?```/g, "").trim();
       setMsgs(prev => [...prev, { role:"assistant", content: clean + (done.length > 0 ? "\n\n" + done.join("\n") : "") }]);
     } catch(e) {
       setMsgs(prev => [...prev, { role:"assistant", content:`⚠️ Error: ${e.message}` }]);
