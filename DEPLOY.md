@@ -25,9 +25,7 @@ vpa-app/
 ## Your Configuration Values
 
 ```
-NOTION_TOKEN=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
-VITE_TASKS_DB_ID=e24f85a24a9c4ac0b2565b576aab6a7e
-VITE_KB_DB_ID=34ba3a2d3db280b28f62ce51a937317d
+check my private note
 ```
 
 ---
