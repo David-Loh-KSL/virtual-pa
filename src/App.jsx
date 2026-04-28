@@ -180,10 +180,16 @@ export default function App() {
   const patchTask = useCallback(async (notionId, patch) => {
     setSyncing(true);
     try {
-      setTasks(prev => prev.map(t => t.notionId === notionId ? { ...t, ...patch } : t));
-      await updateTask(notionId, patch);
+      // Always preserve existing subtasks if patch doesn't explicitly include them
+      const existingTask = tasks.find(t => t.notionId === notionId);
+      const safePatch = { ...patch };
+      if (!safePatch.subtasks && existingTask?.subtasks) {
+        safePatch.subtasks = existingTask.subtasks;
+      }
+      setTasks(prev => prev.map(t => t.notionId === notionId ? { ...t, ...safePatch } : t));
+      await updateTask(notionId, safePatch);
     } finally { setSyncing(false); }
-  }, []);
+  }, [tasks]);
 
   const removeTask = useCallback(async (notionId) => {
     setSyncing(true);
@@ -226,6 +232,12 @@ ${ts}
 ${ks}
 
 ## ACTIONS — CRITICAL: output ONLY an 'actions' code block at the END of your message (not 'json'). This is parsed programmatically — wrong block type means actions are IGNORED and shown raw to user:
+
+## SUBTASK RULES — VERY IMPORTANT:
+- When updating a task, ALWAYS include the COMPLETE subtasks array in the patch
+- NEVER send an update_task without the full subtasks array
+- To mark a subtask done: include ALL subtasks, change the specific one from done:false to done:true
+- NEVER omit subtasks from a patch — omitting them will preserve existing ones but it is safer to always include them
 \`\`\`actions
 [
   { "action": "create_task", "title": "...", "description": "...", "dueDate": "YYYY-MM-DD or null", "priority": "Low|Medium|High|Urgent", "subtasks": ["step 1","step 2"] },
@@ -299,7 +311,20 @@ ${ks}
               const t = await addTask({ title:act.title, description:act.description||"", dueDate:act.dueDate||null, priority:act.priority||"Medium", subtasks:sub });
               done.push(`✅ Task created in Notion: "${t.title}"`);
             } else if(act.action === "update_task") {
-              await patchTask(act.notionId, act.patch);
+              // Preserve existing subtasks if AI doesn't send them
+              const existingTask = tasks.find(t => t.notionId === act.notionId);
+              const safePatch = { ...act.patch };
+              if (!safePatch.subtasks && existingTask?.subtasks?.length > 0) {
+                safePatch.subtasks = existingTask.subtasks;
+              }
+              // If AI sends subtasks, merge with existing to preserve done states
+              if (safePatch.subtasks && existingTask?.subtasks?.length > 0) {
+                safePatch.subtasks = safePatch.subtasks.map((s, i) => {
+                  const existing = existingTask.subtasks.find(e => e.text === s.text);
+                  return existing ? { ...s, done: s.done !== undefined ? s.done : existing.done } : s;
+                });
+              }
+              await patchTask(act.notionId, safePatch);
               done.push(`🔄 Task updated in Notion`);
             } else if(act.action === "add_kb") {
               await addKb({ title:act.title, content:act.content, category:act.category||"Other" });
@@ -449,7 +474,10 @@ ${ks}
         {/* Header */}
         <div style={s.header}>
           <div>
-            <div style={s.headerTitle}>{tab==="chat"?"AI Personal Assistant":tab==="tasks"?"Task Board":"Knowledge Base"}</div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <div style={s.headerTitle}>{tab==="chat"?"AI Personal Assistant":tab==="tasks"?"Task Board":"Knowledge Base"}</div>
+              {tab==="chat"&&<span style={{fontSize:10,color:"var(--text-muted)",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontWeight:500}}>Genesis 1.1</span>}
+            </div>
             <div style={s.headerSub}>
               {tab==="chat" ? `${openTasks.length} open tasks${overdue.length>0?` · ⚠️ ${overdue.length} overdue`:""}${dueToday.length>0?` · 🔔 ${dueToday.length} due today`:""}` :
                tab==="tasks" ? `${tasks.length} tasks · ${openTasks.length} open · synced with Notion` :
