@@ -108,6 +108,12 @@ function parseMsgAB(ab) {
     }catch{return h.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();}
   };
 
+  console.log("MSG DEBUG - body001F:", (props001F.body||"").slice(0,100));
+  console.log("MSG DEBUG - body0102:", (props0102.body||"").slice(0,100));
+  console.log("MSG DEBUG - bodyHtml001F:", (props001F.bodyHtml||"").slice(0,100));
+  console.log("MSG DEBUG - final body:", (props.body||"").slice(0,100));
+  console.log("MSG DEBUG - final bodyHtml:", (props.bodyHtml||"").slice(0,100));
+
   return {
     subject:props.subject||"(no subject)",
     from:props.fromName?(props.fromEmail?`${props.fromName} <${props.fromEmail}>`:props.fromName):(props.fromEmail||"unknown"),
