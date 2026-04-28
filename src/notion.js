@@ -120,7 +120,12 @@ async function getTasksTitleKey() {
 
 async function taskToPage(task) {
   const titleKey = await getTasksTitleKey();
-  const subtaskText = (task.subtasks || []).filter(s => s && s.text).map(s => `${s.done ? "✅" : "⬜"} ${s.text}`).join("\n");
+  const subtaskText = (task.subtasks || []).map(s => {
+    if (typeof s === "string") return { text: s, done: false };
+    if (s && typeof s === "object") return { text: String(s.text || s.name || "").trim(), done: !!s.done };
+    return null;
+  }).filter(s => s && s.text && s.text !== "undefined" && s.text !== "null")
+    .map(s => `${s.done ? "✅" : "⬜"} ${s.text}`).join("\n");
   const props = {
     [titleKey]: { title: [{ text: { content: task.title } }] },
     "Status": { select: { name: task.status || "Not Started" } },
@@ -138,7 +143,16 @@ async function patchToProperties(patch) {
   if (patch.priority) props["Priority"] = { select: { name: patch.priority } };
   if ("dueDate" in patch) props["Due Date"] = patch.dueDate ? { date: { start: patch.dueDate } } : { date: null };
   if (patch.subtasks !== undefined) {
-    const text = patch.subtasks.filter(s => s && s.text).map(s => `${s.done ? "✅" : "⬜"} ${s.text}`).join("\n");
+    // Normalize subtasks - handle both string and object formats, filter invalid ones
+    const normalized = patch.subtasks.map(s => {
+      if (typeof s === "string") return { text: s, done: false };
+      if (s && typeof s === "object") {
+        const text = s.text || s.name || s.title || "";
+        return { text: String(text).trim(), done: !!s.done };
+      }
+      return null;
+    }).filter(s => s && s.text && s.text !== "undefined" && s.text !== "null");
+    const text = normalized.map(s => `${s.done ? "✅" : "⬜"} ${s.text}`).join("\n");
     props["Subtasks"] = { rich_text: [{ text: { content: text } }] };
   }
   if (patch.title) {

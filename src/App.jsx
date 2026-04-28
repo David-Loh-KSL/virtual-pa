@@ -311,18 +311,24 @@ ${ks}
               const t = await addTask({ title:act.title, description:act.description||"", dueDate:act.dueDate||null, priority:act.priority||"Medium", subtasks:sub });
               done.push(`✅ Task created in Notion: "${t.title}"`);
             } else if(act.action === "update_task") {
-              // Preserve existing subtasks if AI doesn't send them
               const existingTask = tasks.find(t => t.notionId === act.notionId);
               const safePatch = { ...act.patch };
-              if (!safePatch.subtasks && existingTask?.subtasks?.length > 0) {
-                safePatch.subtasks = existingTask.subtasks;
-              }
-              // If AI sends subtasks, merge with existing to preserve done states
-              if (safePatch.subtasks && existingTask?.subtasks?.length > 0) {
-                safePatch.subtasks = safePatch.subtasks.map((s, i) => {
-                  const existing = existingTask.subtasks.find(e => e.text === s.text);
-                  return existing ? { ...s, done: s.done !== undefined ? s.done : existing.done } : s;
-                });
+              // ALWAYS preserve existing subtasks - never let an update wipe them
+              if (existingTask?.subtasks?.length > 0) {
+                if (!safePatch.subtasks) {
+                  // AI didn't send subtasks - use existing ones
+                  safePatch.subtasks = existingTask.subtasks;
+                } else {
+                  // AI sent subtasks - normalize and merge with existing done states
+                  const normalized = safePatch.subtasks.map(s => {
+                    const text = typeof s === "string" ? s : (s?.text || s?.name || "");
+                    const aiDone = typeof s === "object" ? s.done : false;
+                    const existingSub = existingTask.subtasks.find(e => e.text === text);
+                    return { id: existingSub?.id || uid(), text: String(text).trim(), done: aiDone !== undefined ? aiDone : (existingSub?.done || false) };
+                  }).filter(s => s.text && s.text !== "undefined");
+                  // If normalized is empty, keep existing subtasks
+                  safePatch.subtasks = normalized.length > 0 ? normalized : existingTask.subtasks;
+                }
               }
               await patchTask(act.notionId, safePatch);
               done.push(`🔄 Task updated in Notion`);
@@ -476,7 +482,7 @@ ${ks}
           <div>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <div style={s.headerTitle}>{tab==="chat"?"AI Personal Assistant":tab==="tasks"?"Task Board":"Knowledge Base"}</div>
-              {tab==="chat"&&<span style={{fontSize:10,color:"var(--text-muted)",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontWeight:500}}>Genesis 1.1</span>}
+              {tab==="chat"&&<span style={{fontSize:10,color:"var(--text-muted)",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontWeight:500}}>Genesis 1.2</span>}
             </div>
             <div style={s.headerSub}>
               {tab==="chat" ? `${openTasks.length} open tasks${overdue.length>0?` · ⚠️ ${overdue.length} overdue`:""}${dueToday.length>0?` · 🔔 ${dueToday.length} due today`:""}` :
