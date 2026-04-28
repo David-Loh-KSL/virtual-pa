@@ -108,18 +108,20 @@ function parseMsgAB(ab) {
     }catch{return h.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();}
   };
 
-  console.log("MSG DEBUG - body001F:", (props001F.body||"").slice(0,100));
-  console.log("MSG DEBUG - body0102:", (props0102.body||"").slice(0,100));
-  console.log("MSG DEBUG - bodyHtml001F:", (props001F.bodyHtml||"").slice(0,100));
-  console.log("MSG DEBUG - final body:", (props.body||"").slice(0,100));
-  console.log("MSG DEBUG - final bodyHtml:", (props.bodyHtml||"").slice(0,100));
-
   return {
     subject:props.subject||"(no subject)",
     from:props.fromName?(props.fromEmail?`${props.fromName} <${props.fromEmail}>`:props.fromName):(props.fromEmail||"unknown"),
     to:props.toNames||"",
     cc:props.ccNames||"",
-    body:props.bodyHtml?sh(props.bodyHtml):(props.body||"(no body)")
+    body:(()=>{
+      // Only use bodyHtml if it produces clean readable text
+      if(props001F.bodyHtml){
+        const cleaned=sh(props001F.bodyHtml);
+        if(cleaned && cleaned.length>10 && !/[\uFFFD\x00-\x08]/.test(cleaned)) return cleaned;
+      }
+      // Fall back to plain text body (001F version is always cleanest)
+      return props001F.body || props.body || "(no body)";
+    })()
   };
 }
 
@@ -550,7 +552,7 @@ ${ks}
           <div>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <div style={s.headerTitle}>{tab==="chat"?"AI Personal Assistant":tab==="tasks"?"Task Board":"Knowledge Base"}</div>
-              {tab==="chat"&&<span style={{fontSize:10,color:"var(--text-muted)",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontWeight:500}}>Genesis 1.6</span>}
+              {tab==="chat"&&<span style={{fontSize:10,color:"var(--text-muted)",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontWeight:500}}>Genesis 1.7</span>}
             </div>
             <div style={s.headerSub}>
               {tab==="chat" ? `${openTasks.length} open tasks${overdue.length>0?` · ⚠️ ${overdue.length} overdue`:""}${dueToday.length>0?` · 🔔 ${dueToday.length} due today`:""}` :
