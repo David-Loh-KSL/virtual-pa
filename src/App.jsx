@@ -66,7 +66,9 @@ function parseMsgAB(ab) {
     try{return new TextDecoder("utf-8").decode(b).replace(/\0/g,"");}catch{return "";}
   };
   const props={};
-  const TAGS={"0037":"subject","0C1A":"fromName","0C1F":"fromEmail","1000":"body","1013":"bodyHtml","0E04":"toNames","0E03":"ccNames"};
+  const allProps={}; // debug - collect all properties
+  const TAGS={"0037":"subject","0C1A":"fromName","0C1F":"fromEmail","1000":"body","1013":"bodyHtml","0E04":"toNames","0E03":"ccNames",
+    "1009":"bodyRtf","0070":"conversationTopic","0E1D":"normalizedSubject"};
   entries.forEach(e=>{
     if(e.type!==2)return;
     const m=e.name.toUpperCase().match(/^__SUBSTG1\.0_([0-9A-F]{4})([0-9A-F]{4})$/);
@@ -75,6 +77,8 @@ function parseMsgAB(ab) {
     if(m[2]==="001F") props[field]=(props[field]||"")+d16(bytes);
     else if(m[2]==="001E") props[field]=(props[field]||"")+d8(bytes);
     else if(m[2]==="0102") props[field]=(props[field]||"")+d8(bytes);
+    // Debug: log tag and type
+    allProps[m[1]+"_"+m[2]] = (props[field]||"").slice(0,50);
   });
   const sh=h=>{
     try{
@@ -87,6 +91,10 @@ function parseMsgAB(ab) {
       return (d.body.innerText||d.body.textContent||"").replace(/\n{3,}/g,"\n\n").trim();
     }catch{return h.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();}
   };
+  console.log("MSG PROPS FOUND:", Object.keys(allProps).join(", "));
+  console.log("BODY:", (props.body||"").slice(0,100));
+  console.log("BODY HTML:", (props.bodyHtml||"").slice(0,100));
+  console.log("BODY RTF:", (props.bodyRtf||"").slice(0,100));
   return {subject:props.subject||"(no subject)",from:props.fromName?(props.fromEmail?`${props.fromName} <${props.fromEmail}>`:props.fromName):(props.fromEmail||"unknown"),to:props.toNames||"",cc:props.ccNames||"",body:props.bodyHtml?sh(props.bodyHtml):(props.body||"(no body)")};
 }
 
