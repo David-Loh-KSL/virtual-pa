@@ -66,18 +66,25 @@ function parseMsgAB(ab) {
     try{return new TextDecoder("utf-8").decode(b).replace(/\0/g,"");}catch{return "";}
   };
   const props={};
-  const allProps={}; // debug - collect all properties
   const TAGS={"0037":"subject","0C1A":"fromName","0C1F":"fromEmail","1000":"body","1013":"bodyHtml","0E04":"toNames","0E03":"ccNames",
-    "1009":"bodyRtf","0070":"conversationTopic","0E1D":"normalizedSubject"};
+    "0070":"conversationTopic","0E1D":"normalizedSubject"};
   entries.forEach(e=>{
     if(e.type!==2)return;
     const m=e.name.toUpperCase().match(/^__SUBSTG1\.0_([0-9A-F]{4})([0-9A-F]{4})$/);
     if(!m)return; const field=TAGS[m[1]]; if(!field)return;
     const bytes=re(e);
-    if(m[2]==="001F") props[field]=(props[field]||"")+d16(bytes);
-    else if(m[2]==="001E") props[field]=(props[field]||"")+d8(bytes);
-    else if(m[2]==="0102") props[field]=(props[field]||"")+d8(bytes);
-    // Debug: log tag and type
+    if(m[2]==="001F") {
+      // UTF-16LE - highest priority, always overwrite 0102 version
+      const decoded = d16(bytes);
+      // Strip leading garbage/BOM bytes (non-printable chars before real content)
+      const cleaned = decoded.replace(/^[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFD\uFFFE\uFFFF]+/, "").trim();
+      if(cleaned) props[field] = cleaned;
+    } else if(m[2]==="001E") {
+      if(!props[field]) props[field] = (props[field]||"")+d8(bytes);
+    } else if(m[2]==="0102") {
+      // Only use binary if we don't have a better version
+      if(!props[field]) props[field] = (props[field]||"")+d8(bytes);
+    }
     allProps[m[1]+"_"+m[2]] = (props[field]||"").slice(0,50);
   });
   const sh=h=>{
@@ -91,10 +98,6 @@ function parseMsgAB(ab) {
       return (d.body.innerText||d.body.textContent||"").replace(/\n{3,}/g,"\n\n").trim();
     }catch{return h.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();}
   };
-  console.log("MSG PROPS FOUND:", Object.keys(allProps).join(", "));
-  console.log("BODY:", (props.body||"").slice(0,100));
-  console.log("BODY HTML:", (props.bodyHtml||"").slice(0,100));
-  console.log("BODY RTF:", (props.bodyRtf||"").slice(0,100));
   return {subject:props.subject||"(no subject)",from:props.fromName?(props.fromEmail?`${props.fromName} <${props.fromEmail}>`:props.fromName):(props.fromEmail||"unknown"),to:props.toNames||"",cc:props.ccNames||"",body:props.bodyHtml?sh(props.bodyHtml):(props.body||"(no body)")};
 }
 
@@ -512,7 +515,7 @@ ${ks}
           <div>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <div style={s.headerTitle}>{tab==="chat"?"AI Personal Assistant":tab==="tasks"?"Task Board":"Knowledge Base"}</div>
-              {tab==="chat"&&<span style={{fontSize:10,color:"var(--text-muted)",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontWeight:500}}>Genesis 1.3</span>}
+              {tab==="chat"&&<span style={{fontSize:10,color:"var(--text-muted)",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontWeight:500}}>Genesis 1.4</span>}
             </div>
             <div style={s.headerSub}>
               {tab==="chat" ? `${openTasks.length} open tasks${overdue.length>0?` · ⚠️ ${overdue.length} overdue`:""}${dueToday.length>0?` · 🔔 ${dueToday.length} due today`:""}` :
