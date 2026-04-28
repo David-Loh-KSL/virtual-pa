@@ -53,7 +53,18 @@ function parseMsgAB(ab) {
   const rmc=(s,sz)=>{const d=getMSD();const secs=mc(s);const buf=new Uint8Array(secs.length*64);secs.forEach((s,i)=>buf.set(d.subarray(s*64,(s+1)*64),i*64));return sz!==undefined?buf.subarray(0,sz):buf;};
   const re=e=>e.size<miniCut&&e.start<0xFFFFFFFB?rmc(e.start,e.size):readChain(e.start,e.size);
   const d16=b=>{try{return new TextDecoder("utf-16le").decode(b).replace(/\0/g,"");}catch{return "";}};
-  const d8=b=>{try{return new TextDecoder("utf-8").decode(b).replace(/\0/g,"");}catch{return "";}};
+  const d8=b=>{
+    // Try multiple encodings for 8-bit strings
+    const encs=["utf-8","windows-1252","iso-8859-1"];
+    for(const enc of encs){
+      try{
+        const t=new TextDecoder(enc,{fatal:true}).decode(b).replace(/\0/g,"");
+        if(t&&!/[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(t)) return t;
+      }catch{}
+    }
+    // Last resort - utf-8 without fatal
+    try{return new TextDecoder("utf-8").decode(b).replace(/\0/g,"");}catch{return "";}
+  };
   const props={};
   const TAGS={"0037":"subject","0C1A":"fromName","0C1F":"fromEmail","1000":"body","1013":"bodyHtml","0E04":"toNames","0E03":"ccNames"};
   entries.forEach(e=>{
@@ -61,10 +72,21 @@ function parseMsgAB(ab) {
     const m=e.name.toUpperCase().match(/^__SUBSTG1\.0_([0-9A-F]{4})([0-9A-F]{4})$/);
     if(!m)return; const field=TAGS[m[1]]; if(!field)return;
     const bytes=re(e);
-    if(m[2]==="001F"||m[2]==="001E") props[field]=(props[field]||"")+d16(bytes);
+    if(m[2]==="001F") props[field]=(props[field]||"")+d16(bytes);
+    else if(m[2]==="001E") props[field]=(props[field]||"")+d8(bytes);
     else if(m[2]==="0102") props[field]=(props[field]||"")+d8(bytes);
   });
-  const sh=h=>{try{const d=new DOMParser().parseFromString(h,"text/html");return d.body.innerText||d.body.textContent||"";}catch{return h.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();}};
+  const sh=h=>{
+    try{
+      // Remove style/script tags first
+      const cleaned=h.replace(/<style[^>]*>[\s\S]*?<\/style>/gi,"")
+                     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi,"")
+                     .replace(/&nbsp;/gi," ").replace(/&amp;/gi,"&")
+                     .replace(/&lt;/gi,"<").replace(/&gt;/gi,">");
+      const d=new DOMParser().parseFromString(cleaned,"text/html");
+      return (d.body.innerText||d.body.textContent||"").replace(/\n{3,}/g,"\n\n").trim();
+    }catch{return h.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();}
+  };
   return {subject:props.subject||"(no subject)",from:props.fromName?(props.fromEmail?`${props.fromName} <${props.fromEmail}>`:props.fromName):(props.fromEmail||"unknown"),to:props.toNames||"",cc:props.ccNames||"",body:props.bodyHtml?sh(props.bodyHtml):(props.body||"(no body)")};
 }
 
@@ -482,7 +504,7 @@ ${ks}
           <div>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <div style={s.headerTitle}>{tab==="chat"?"AI Personal Assistant":tab==="tasks"?"Task Board":"Knowledge Base"}</div>
-              {tab==="chat"&&<span style={{fontSize:10,color:"var(--text-muted)",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontWeight:500}}>Genesis 1.2</span>}
+              {tab==="chat"&&<span style={{fontSize:10,color:"var(--text-muted)",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontWeight:500}}>Genesis 1.3</span>}
             </div>
             <div style={s.headerSub}>
               {tab==="chat" ? `${openTasks.length} open tasks${overdue.length>0?` · ⚠️ ${overdue.length} overdue`:""}${dueToday.length>0?` · 🔔 ${dueToday.length} due today`:""}` :
