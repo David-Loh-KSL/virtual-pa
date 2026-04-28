@@ -25,81 +25,48 @@ const toBase64 = (file) => new Promise((res,rej) => { const r=new FileReader(); 
 const toText   = (file) => new Promise((res,rej) => { const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsText(file,"utf-8"); });
 const toAB     = (file) => new Promise((res,rej) => { const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsArrayBuffer(file); });
 
-// ── .msg CFB parser ───────────────────────────────────────────────────────────
-function parseMsgAB(ab) {
-  const u8=new Uint8Array(ab), dv=new DataView(ab);
-  const MAGIC=[0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1];
-  for(let i=0;i<8;i++) if(u8[i]!==MAGIC[i]) throw new Error("Not CFB");
-  const secSz=1<<dv.getUint16(0x1E,true), nFAT=dv.getUint32(0x2C,true), dirSec=dv.getUint32(0x30,true);
-  const miniCut=dv.getUint32(0x38,true), mFAT0=dv.getUint32(0x3C,true);
-  const fatSecs=[];
-  for(let i=0;i<109&&fatSecs.length<nFAT;i++){const s=dv.getUint32(0x4C+i*4,true);if(s<0xFFFFFFFB)fatSecs.push(s);}
-  const fat=new Int32Array(fatSecs.length*(secSz/4));
-  fatSecs.forEach((s,idx)=>{const off=(s+1)*secSz;for(let i=0;i<secSz/4;i++)fat[idx*(secSz/4)+i]=dv.getInt32(off+i*4,true);});
-  const chain=s=>{const r=[];const seen=new Set();while(s>=0&&s<0xFFFFFFFB&&!seen.has(s)){seen.add(s);r.push(s);s=fat[s];}return r;};
-  const readChain=(s,sz)=>{const secs=chain(s);const buf=new Uint8Array(secs.length*secSz);secs.forEach((s,i)=>buf.set(u8.subarray((s+1)*secSz,(s+2)*secSz),i*secSz));return sz!==undefined?buf.subarray(0,sz):buf;};
-  let mfs=[],ms=mFAT0;while(ms>=0&&ms<0xFFFFFFFB){mfs.push(ms);ms=fat[ms];}
-  const mFAT=new Int32Array(mfs.length*(secSz/4));
-  mfs.forEach((s,idx)=>{const off=(s+1)*secSz;for(let i=0;i<secSz/4;i++)mFAT[idx*(secSz/4)+i]=dv.getInt32(off+i*4,true);});
-  const dir=readChain(dirSec); const msr={start:0,size:0}; const entries=[];
-  for(let i=0;i<dir.length/128;i++){
-    const off=i*128,nl=new DataView(dir.buffer,dir.byteOffset+off+64,2).getUint16(0,true);
-    const name=String.fromCharCode(...new Uint16Array(dir.buffer,dir.byteOffset+off,nl/2)).replace(/\0/g,"");
-    const type=dir[off+66],start=new DataView(dir.buffer,dir.byteOffset+off+116,4).getUint32(0,true),size=new DataView(dir.buffer,dir.byteOffset+off+120,4).getUint32(0,true);
-    if(i===0){msr.start=start;msr.size=size;} entries.push({name,type,start,size});
+// ── .msg parser using @kenjiuno/msgreader ────────────────────────────────────
+async function parseMsgFile(file) {
+  try {
+    const MsgReader = (await import("@kenjiuno/msgreader")).default;
+    const ab = await toAB(file);
+    const reader = new MsgReader(ab);
+    const info = reader.getFileData();
+
+    // Extract body - try multiple sources
+    let body = "";
+    if (info.body && info.body.trim()) {
+      body = info.body.trim();
+    } else if (info.bodyHtml && info.bodyHtml.trim()) {
+      // Strip HTML tags
+      try {
+        const cleaned = info.bodyHtml
+          .replace(/<style[\s\S]*?<\/style>/gi, "")
+          .replace(/<script[\s\S]*?<\/script>/gi, "")
+          .replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&")
+          .replace(/&lt;/gi, "<").replace(/&gt;/gi, ">");
+        const d = new DOMParser().parseFromString(cleaned, "text/html");
+        body = (d.body.innerText || d.body.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
+      } catch { body = info.bodyHtml.replace(/<[^>]+>/g, " ").trim(); }
+    }
+
+    // Extract recipients
+    const to = (info.recipients || []).filter(r => r.recipType === "to").map(r => r.name || r.email || "").filter(Boolean).join("; ");
+    const cc = (info.recipients || []).filter(r => r.recipType === "cc").map(r => r.name || r.email || "").filter(Boolean).join("; ");
+
+    return {
+      subject: info.subject || "(no subject)",
+      from: info.senderName ? (info.senderEmail ? `${info.senderName} <${info.senderEmail}>` : info.senderName) : (info.senderEmail || "unknown"),
+      to,
+      cc,
+      body: body || "(no body)"
+    };
+  } catch(e) {
+    console.error("msgreader failed:", e);
+    throw e;
   }
-  let msd=null;const getMSD=()=>{if(!msd)msd=readChain(msr.start,msr.size);return msd;};
-  const mc=s=>{const r=[];const seen=new Set();while(s>=0&&s<0xFFFFFFFB&&!seen.has(s)){seen.add(s);r.push(s);s=mFAT[s];}return r;};
-  const rmc=(s,sz)=>{const d=getMSD();const secs=mc(s);const buf=new Uint8Array(secs.length*64);secs.forEach((s,i)=>buf.set(d.subarray(s*64,(s+1)*64),i*64));return sz!==undefined?buf.subarray(0,sz):buf;};
-  const re=e=>e.size<miniCut&&e.start<0xFFFFFFFB?rmc(e.start,e.size):readChain(e.start,e.size);
-  const d16=b=>{try{return new TextDecoder("utf-16le").decode(b).replace(/\0/g,"");}catch{return "";}};
-  const d8=b=>{
-    // Try multiple encodings for 8-bit strings
-    const encs=["utf-8","windows-1252","iso-8859-1"];
-    for(const enc of encs){
-      try{
-        const t=new TextDecoder(enc,{fatal:true}).decode(b).replace(/\0/g,"");
-        if(t&&!/[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(t)) return t;
-      }catch{}
-    }
-    // Last resort - utf-8 without fatal
-    try{return new TextDecoder("utf-8").decode(b).replace(/\0/g,"");}catch{return "";}
-  };
-  const props={};
-  const TAGS={"0037":"subject","0C1A":"fromName","0C1F":"fromEmail","1000":"body","1013":"bodyHtml","0E04":"toNames","0E03":"ccNames",
-    "0070":"conversationTopic","0E1D":"normalizedSubject"};
-  entries.forEach(e=>{
-    if(e.type!==2)return;
-    const m=e.name.toUpperCase().match(/^__SUBSTG1\.0_([0-9A-F]{4})([0-9A-F]{4})$/);
-    if(!m)return; const field=TAGS[m[1]]; if(!field)return;
-    const bytes=re(e);
-    if(m[2]==="001F") {
-      // UTF-16LE - highest priority, always overwrite 0102 version
-      const decoded = d16(bytes);
-      // Strip leading garbage/BOM bytes (non-printable chars before real content)
-      const cleaned = decoded.replace(/^[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFD\uFFFE\uFFFF]+/, "").trim();
-      if(cleaned) props[field] = cleaned;
-    } else if(m[2]==="001E") {
-      if(!props[field]) props[field] = (props[field]||"")+d8(bytes);
-    } else if(m[2]==="0102") {
-      // Only use binary if we don't have a better version
-      if(!props[field]) props[field] = (props[field]||"")+d8(bytes);
-    }
-    allProps[m[1]+"_"+m[2]] = (props[field]||"").slice(0,50);
-  });
-  const sh=h=>{
-    try{
-      // Remove style/script tags first
-      const cleaned=h.replace(/<style[^>]*>[\s\S]*?<\/style>/gi,"")
-                     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi,"")
-                     .replace(/&nbsp;/gi," ").replace(/&amp;/gi,"&")
-                     .replace(/&lt;/gi,"<").replace(/&gt;/gi,">");
-      const d=new DOMParser().parseFromString(cleaned,"text/html");
-      return (d.body.innerText||d.body.textContent||"").replace(/\n{3,}/g,"\n\n").trim();
-    }catch{return h.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();}
-  };
-  return {subject:props.subject||"(no subject)",from:props.fromName?(props.fromEmail?`${props.fromName} <${props.fromEmail}>`:props.fromName):(props.fromEmail||"unknown"),to:props.toNames||"",cc:props.ccNames||"",body:props.bodyHtml?sh(props.bodyHtml):(props.body||"(no body)")};
 }
+
 
 async function parseExcel(file) {
   try {
@@ -122,7 +89,15 @@ async function parseWord(file) {
 }
 
 async function parseAttachment(file) {
-  if(isMsg(file)){try{const ab=await toAB(file);const p=parseMsgAB(ab);return{type:"email",label:file.name,content:`📧 Email: ${p.subject}\nFrom: ${p.from}\nTo: ${p.to}${p.cc?"\nCC:"+p.cc:""}\n\n${p.body.slice(0,3000)}`};}catch{try{return{type:"email",label:file.name,content:`📧 Email (raw):\n${(await toText(file)).slice(0,3000)}`};}catch{return{type:"error",label:file.name,content:"Could not parse .msg"};}}  }
+  if(isMsg(file)){
+    try{
+      const p=await parseMsgFile(file);
+      return{type:"email",label:file.name,content:`📧 Email: ${p.subject}\nFrom: ${p.from}\nTo: ${p.to}${p.cc?"\nCC: "+p.cc:""}\n\n${p.body.slice(0,3000)}`};
+    }catch(e){
+      try{return{type:"email",label:file.name,content:`📧 Email (raw):\n${(await toText(file)).slice(0,3000)}`};}
+      catch{return{type:"error",label:file.name,content:`Could not parse .msg: ${e.message}`};}
+    }
+  }
   if(isEml(file)){try{const text=await toText(file);const lines=text.split("\n");const h={};let bs=0;for(let i=0;i<lines.length;i++){if(!lines[i].trim()){bs=i+1;break;}const m=lines[i].match(/^(From|To|Subject|Date|CC):\s*(.+)/i);if(m)h[m[1].toLowerCase()]=m[2].trim();}return{type:"email",label:file.name,content:`📧 Email: ${h.subject||"(no subject)"}\nFrom: ${h.from||""}\nTo: ${h.to||""}\nDate: ${h.date||""}\n\n${lines.slice(bs).join("\n").slice(0,3000)}`};}catch{return{type:"error",label:file.name,content:"Could not parse .eml"};}}
   if(isImage(file)){return{type:"image",label:file.name,b64:await toBase64(file),mimeType:file.type};}
   if(isPDF(file)){return{type:"pdf",label:file.name,b64:await toBase64(file)};}
@@ -515,7 +490,7 @@ ${ks}
           <div>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <div style={s.headerTitle}>{tab==="chat"?"AI Personal Assistant":tab==="tasks"?"Task Board":"Knowledge Base"}</div>
-              {tab==="chat"&&<span style={{fontSize:10,color:"var(--text-muted)",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontWeight:500}}>Genesis 1.4</span>}
+              {tab==="chat"&&<span style={{fontSize:10,color:"var(--text-muted)",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontWeight:500}}>Genesis 1.5</span>}
             </div>
             <div style={s.headerSub}>
               {tab==="chat" ? `${openTasks.length} open tasks${overdue.length>0?` · ⚠️ ${overdue.length} overdue`:""}${dueToday.length>0?` · 🔔 ${dueToday.length} due today`:""}` :
