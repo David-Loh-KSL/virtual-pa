@@ -434,6 +434,17 @@ ${ks}
   const handleDragOver = (e) => e.preventDefault();
   const handleDrop = (e) => { e.preventDefault(); dragCounter.current=0; setDragging(false); const d=Array.from(e.dataTransfer.files); if(d.length>0) setFiles(prev=>[...prev,...d]); };
 
+  // ── Paste screenshot from clipboard ──────────────────────────────────────
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageItems = Array.from(items).filter(item => item.type.startsWith("image/"));
+    if (imageItems.length === 0) return; // no image — let normal paste work
+    e.preventDefault();
+    const newFiles = imageItems.map(item => item.getAsFile()).filter(Boolean);
+    if (newFiles.length > 0) setFiles(prev => [...prev, ...newFiles]);
+  };
+
   const openTasks = tasks.filter(t => t.status !== "Completed");
   const overdue = tasks.filter(t => t.status !== "Completed" && t.dueDate && daysUntil(t.dueDate) < 0);
   const dueToday = tasks.filter(t => t.status !== "Completed" && t.dueDate && daysUntil(t.dueDate) === 0);
@@ -632,7 +643,7 @@ ${ks}
                 <input type="file" ref={fileRef} onChange={handleFileInput} multiple className="hidden" style={{display:"none"}}
                   accept=".msg,.eml,.pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.html,.json,.png,.jpg,.jpeg,.gif,.webp,.pptx"/>
                 <button onClick={() => fileRef.current?.click()} style={{color:"var(--text-muted)",fontSize:18,cursor:"pointer",flexShrink:0}} title="Attach file">📎</button>
-                <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKey}
+                <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKey} onPaste={handlePaste}
                   placeholder="Tell me about a task, attach an email, or ask me anything..."
                   style={s.textarea} rows={1}
                   onInput={e => { e.target.style.height="auto"; e.target.style.height=e.target.scrollHeight+"px"; }}/>
@@ -643,7 +654,7 @@ ${ks}
                 </button>
               </div>
               <p style={{textAlign:"center",fontSize:10,color:"var(--text-muted)",marginTop:6}}>
-                🟢 Connected to Notion · Tasks and KB save automatically · Enter to send
+                🟢 Connected to Notion · Tasks and KB save automatically · Ctrl+V to paste screenshot · Enter to send
               </p>
             </div>
           </div>
