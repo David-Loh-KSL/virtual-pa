@@ -370,7 +370,9 @@ ${ks}
           })
         });
         const azData = await resp.json();
-        raw = azData.choices?.[0]?.message?.content || "Sorry, I couldn't process that.";
+        console.log("Azure response status:", resp.status);
+        console.log("Azure response data:", JSON.stringify(azData).slice(0,500));
+        raw = azData.choices?.[0]?.message?.content || azData.error?.message || "Sorry, I couldn't process that.";
       } else {
         // Claude
         resp = await fetch("/api/proxy-claude", {
