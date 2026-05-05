@@ -67,26 +67,59 @@ app.post("/api/proxy-claude", async (req, res) => {
   }
 });
 
-// Azure OpenAI proxy — /api/proxy-azure
+// Azure OpenAI proxy — /api/proxy-azure (uses Responses API for GPT-5.4)
 app.post("/api/proxy-azure", async (req, res) => {
   const AZURE_KEY = process.env.AZURE_OPENAI_KEY;
   const AZURE_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT || "https://kaiva-dev-az-openai.openai.azure.com";
   const AZURE_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4";
-  const AZURE_API_VERSION = "2025-01-01-preview";
+  const AZURE_API_VERSION = "2025-04-01-preview";
 
   if (!AZURE_KEY) { res.status(500).json({ error: "AZURE_OPENAI_KEY not set" }); return; }
 
-  const url = `${AZURE_ENDPOINT}/openai/deployments/${AZURE_DEPLOYMENT}/chat/completions?api-version=${AZURE_API_VERSION}`;
-  console.log("Azure GPT-5.4 API call");
+  console.log("Azure GPT-5.4 Responses API call");
   try {
+    const body = req.body;
+    const systemMsg = body.messages?.find(m => m.role === "system");
+    const userMsgs = body.messages?.filter(m => m.role !== "system") || [];
+
+    const responsesBody = {
+      model: AZURE_DEPLOYMENT,
+      input: userMsgs.map(m => ({
+        role: m.role,
+        content: typeof m.content === "string" ? m.content : (Array.isArray(m.content) ? m.content.find(c => c.type === "text")?.text || "" : "")
+      })),
+      ...(systemMsg ? { instructions: systemMsg.content } : {}),
+      max_output_tokens: body.max_tokens || 2000,
+    };
+
+    const url = `${AZURE_ENDPOINT}/openai/responses?api-version=${AZURE_API_VERSION}`;
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "api-key": AZURE_KEY },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify(responsesBody)
     });
     const data = await response.json();
-    res.status(response.status).json(data);
+    console.log("Azure response status:", response.status);
+
+    // Extract text content from Responses API output
+    let content = "";
+    if (data.output) {
+      for (const item of data.output) {
+        if (item.content) {
+          for (const c of item.content) {
+            if (c.type === "output_text" || c.type === "text") content += c.text || "";
+          }
+        } else if (item.text) content += item.text;
+      }
+    } else if (data.choices) {
+      content = data.choices[0]?.message?.content || "";
+    }
+
+    res.status(response.status).json({
+      choices: [{ message: { content: content || data.error?.message || "No response" } }]
+    });
   } catch(e) {
+    console.error("Azure proxy error:", e);
     res.status(500).json({ error: e.message });
   }
 });
