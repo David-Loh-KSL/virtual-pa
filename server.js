@@ -67,6 +67,30 @@ app.post("/api/proxy-claude", async (req, res) => {
   }
 });
 
+// Azure OpenAI proxy — /api/proxy-azure
+app.post("/api/proxy-azure", async (req, res) => {
+  const AZURE_KEY = process.env.AZURE_OPENAI_KEY;
+  const AZURE_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT || "https://kaiva-dev-az-openai.openai.azure.com";
+  const AZURE_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4";
+  const AZURE_API_VERSION = "2025-01-01-preview";
+
+  if (!AZURE_KEY) { res.status(500).json({ error: "AZURE_OPENAI_KEY not set" }); return; }
+
+  const url = `${AZURE_ENDPOINT}/openai/deployments/${AZURE_DEPLOYMENT}/chat/completions?api-version=${AZURE_API_VERSION}`;
+  console.log("Azure GPT-5.4 API call");
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "api-key": AZURE_KEY },
+      body: JSON.stringify(req.body)
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Fallback to React app
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));

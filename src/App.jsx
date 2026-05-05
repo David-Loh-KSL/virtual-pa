@@ -203,6 +203,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [model, setModel] = useState(() => localStorage.getItem("vpa_model") || "claude");
   const bottomRef = useRef(null);
   const fileRef = useRef(null);
   const dragCounter = useRef(0);
@@ -231,6 +232,7 @@ export default function App() {
   // Persist chat and email to localStorage
   useEffect(() => { if(msgs.length > 1) localStorage.setItem("vpa_msgs", JSON.stringify(msgs.slice(-60))); }, [msgs]);
   useEffect(() => { localStorage.setItem("vpa_email", userEmail); }, [userEmail]);
+  useEffect(() => { localStorage.setItem("vpa_model", model); }, [model]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [msgs, loading]);
 
   // ── Task helpers (Notion-backed) ──────────────────────────────────────────
@@ -352,13 +354,33 @@ ${ks}
         return { role: m.role, content: typeof m.content === "string" ? m.content : m.content };
       });
 
-      const resp = await fetch("/api/proxy-claude", {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:2000, system: buildSystem(), messages: history })
-      });
-      const data = await resp.json();
-      const raw = data.content?.find(b => b.type === "text")?.text || "Sorry, I couldn't process that.";
+      let resp, raw;
+      if (model === "azure") {
+        // Azure GPT-5.4
+        resp = await fetch("/api/proxy-azure", {
+          method: "POST",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({
+            messages: [
+              { role:"system", content: buildSystem() },
+              ...history.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: typeof m.content === "string" ? m.content : (Array.isArray(m.content) ? m.content.find(c=>c.type==="text")?.text || "" : "") }))
+            ],
+            max_tokens: 2000,
+            temperature: 0.7
+          })
+        });
+        const azData = await resp.json();
+        raw = azData.choices?.[0]?.message?.content || "Sorry, I couldn't process that.";
+      } else {
+        // Claude
+        resp = await fetch("/api/proxy-claude", {
+          method: "POST",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:2000, system: buildSystem(), messages: history })
+        });
+        const data = await resp.json();
+        raw = data.content?.find(b => b.type === "text")?.text || "Sorry, I couldn't process that.";
+      }
 
       // Execute actions
       // Try to find actions block - AI sometimes outputs ```actions, ```json, or plain ```
@@ -563,7 +585,7 @@ ${ks}
           <div>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <div style={s.headerTitle}>{tab==="chat"?"AI Personal Assistant":tab==="tasks"?"Task Board":"Knowledge Base"}</div>
-              {tab==="chat"&&<span style={{fontSize:10,color:"var(--text-muted)",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontWeight:500}}>Genesis 1.7</span>}
+              {tab==="chat"&&<span style={{fontSize:10,color:"var(--text-muted)",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:6,padding:"2px 6px",fontWeight:500}}>Exodus 1.0</span>}
             </div>
             <div style={s.headerSub}>
               {tab==="chat" ? `${openTasks.length} open tasks${overdue.length>0?` · ⚠️ ${overdue.length} overdue`:""}${dueToday.length>0?` · 🔔 ${dueToday.length} due today`:""}` :
@@ -572,6 +594,22 @@ ${ks}
             </div>
           </div>
           <div style={{display:"flex", gap:8, alignItems:"center"}}>
+            {tab==="chat" && (
+              <div style={{display:"flex",alignItems:"center",background:"var(--bg-elevated)",border:"1px solid var(--border)",borderRadius:10,padding:"2px",gap:2}}>
+                <button onClick={()=>setModel("claude")}
+                  style={{fontSize:11,padding:"4px 10px",borderRadius:8,border:"none",cursor:"pointer",transition:"all .15s",
+                    background:model==="claude"?"var(--accent)":"transparent",
+                    color:model==="claude"?"#fff":"var(--text-muted)",fontWeight:model==="claude"?600:400}}>
+                  ✦ Claude
+                </button>
+                <button onClick={()=>setModel("azure")}
+                  style={{fontSize:11,padding:"4px 10px",borderRadius:8,border:"none",cursor:"pointer",transition:"all .15s",
+                    background:model==="azure"?"#0078d4":"transparent",
+                    color:model==="azure"?"#fff":"var(--text-muted)",fontWeight:model==="azure"?600:400}}>
+                  ⚡ GPT-5.4
+                </button>
+              </div>
+            )}
             {tab==="chat" && (
               <button style={s.btn} onClick={() => { if(window.confirm("Clear chat history? Tasks and KB in Notion are NOT affected.")) { setMsgs([WELCOME]); localStorage.removeItem("vpa_msgs"); } }}>🗑️ Clear Chat</button>
             )}
@@ -654,7 +692,7 @@ ${ks}
                 </button>
               </div>
               <p style={{textAlign:"center",fontSize:10,color:"var(--text-muted)",marginTop:6}}>
-                🟢 Connected to Notion · Tasks and KB save automatically · Ctrl+V to paste screenshot · Enter to send
+                🟢 Connected to Notion · {model==="azure"?"⚡ Azure GPT-5.4 active":"✦ Claude Sonnet 4 active"} · Ctrl+V to paste · Enter to send
               </p>
             </div>
           </div>
